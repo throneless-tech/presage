@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ops::Range,
     path::Path,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
@@ -43,7 +44,7 @@ const SLED_KEY_STORE_CIPHER: &str = "store_cipher";
 
 #[derive(Clone)]
 pub struct SledStore {
-    db: Arc<RwLock<sled::Db>>,
+    db: Arc<RwLock<HashMap<StoreKey, String>>>,
     #[cfg(feature = "encryption")]
     cipher: Option<Arc<presage_store_cipher::StoreCipher>>,
     /// Whether to trust new identities automatically (for instance, when a somebody's phone has changed)
@@ -107,6 +108,21 @@ pub enum OnNewIdentity {
     Trust,
 }
 
+#[derive(Hash, Eq, PartialEq, Debug)]
+pub struct StoreKey {
+    table: String,
+    key: String,
+}
+
+impl StoreKey {
+    fn new(table: &str, key: &str) -> StoreKey {
+        StoreKey {
+            table: table.to_string(),
+            key: key.to_string()
+        }
+    }
+}
+
 impl SledStore {
     #[allow(unused_variables)]
     fn new(
@@ -114,7 +130,9 @@ impl SledStore {
         passphrase: Option<impl AsRef<str>>,
         trust_new_identities: OnNewIdentity,
     ) -> Result<Self, SledStoreError> {
-        let database = sled::open(db_path)?;
+        // let database = sled::open(db_path)?;
+
+        let database: HashMap<StoreKey, String> = HashMap::new();
 
         #[cfg(feature = "encryption")]
         let cipher = passphrase
@@ -191,9 +209,14 @@ impl SledStore {
         })
     }
 
-    fn read(&self) -> RwLockReadGuard<sled::Db> {
-        self.db.read().expect("poisoned rwlock")
+    // fn read(&self) -> RwLockReadGuard<sled::Db> {
+    //     self.db.read().expect("poisoned rwlock")
+    // }
+    
+    fn read(&self) -> RwLockReadGuard<HashMap<StoreKey, String>> {
+        self.db
     }
+    
 
     fn write(&self) -> RwLockWriteGuard<sled::Db> {
         self.db.write().expect("poisoned rwlock")
@@ -207,7 +230,7 @@ impl SledStore {
     }
 
     #[cfg(feature = "encryption")]
-    fn decrypt_value<T: DeserializeOwned>(&self, value: IVec) -> Result<T, SledStoreError> {
+    fn decrypt_value<T: DeserializeOwned>(&self, value: Vec<u8>) -> Result<T, SledStoreError> {
         if let Some(cipher) = self.cipher.as_ref() {
             Ok(cipher.decrypt_value(&value)?)
         } else {
@@ -240,8 +263,7 @@ impl SledStore {
         V: DeserializeOwned,
     {
         self.read()
-            .open_tree(tree)?
-            .get(key)?
+            .get(&StoreKey::new(tree, key))?
             .map(|p| self.decrypt_value(p))
             .transpose()
             .map_err(SledStoreError::from)
