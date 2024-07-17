@@ -22,7 +22,7 @@ use presage::{
 };
 use protocol::{AciSledStore, PniSledStore, SledProtocolStore, SledTrees};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::{digest::consts::U8, Digest, Sha256};
 
 mod content;
 mod error;
@@ -132,7 +132,7 @@ impl SledStore {
     ) -> Result<Self, SledStoreError> {
         // let database = sled::open(db_path)?;
 
-        let database: HashMap<StoreKey, String> = HashMap::new();
+        let database: HashMap<StoreKey, Vec<u8>> = HashMap::new();
 
         #[cfg(feature = "encryption")]
         let cipher = passphrase
@@ -213,13 +213,17 @@ impl SledStore {
     //     self.db.read().expect("poisoned rwlock")
     // }
     
-    fn read(&self) -> RwLockReadGuard<HashMap<StoreKey, String>> {
+    fn read(&self) -> RwLockReadGuard<HashMap<StoreKey, Vec<u8>>> {
         self.db
     }
     
 
-    fn write(&self) -> RwLockWriteGuard<sled::Db> {
-        self.db.write().expect("poisoned rwlock")
+    // fn write(&self) -> RwLockWriteGuard<sled::Db> {
+    //     self.db.write().expect("poisoned rwlock")
+    // }
+
+    fn write(&self) -> RwLockWriteGuard<HashMap<StoreKey, Vec<u8>>> {
+        self.db
     }
 
     fn schema_version(&self) -> SchemaVersion {
@@ -266,7 +270,7 @@ impl SledStore {
             .get(&StoreKey::new(tree, key))?
             .map(|p| self.decrypt_value(p))
             .transpose()
-            .map_err(SledStoreError::from)
+            .map_err(SledStoreError::from) // TODO 
     }
 
     pub fn iter<'a, V: DeserializeOwned + 'a>(
@@ -275,10 +279,11 @@ impl SledStore {
     ) -> Result<impl Iterator<Item = Result<V, SledStoreError>> + 'a, SledStoreError> {
         Ok(self
             .read()
-            .open_tree(tree)?
+            // .open_tree(tree)?
             .iter()
+            .filter(|(&key, _)| key.table == tree)
             .flat_map(|res| res.map(|(_, value)| self.decrypt_value::<V>(value))))
-    }
+    } 
 
     fn insert<K, V>(&self, tree: &str, key: K, value: V) -> Result<bool, SledStoreError>
     where
@@ -287,8 +292,8 @@ impl SledStore {
     {
         let value = self.encrypt_value(&value)?;
         let db = self.write();
-        let replaced = db.open_tree(tree)?.insert(key, value)?;
-        db.flush()?;
+        // let replaced = db.open_tree(tree)?.insert(key, value)?;
+        let replaced = db.insert(StoreKey::new(tree, key), value);
         Ok(replaced.is_some())
     }
 
@@ -297,8 +302,7 @@ impl SledStore {
         K: AsRef<[u8]>,
     {
         let db = self.write();
-        let removed = db.open_tree(tree)?.remove(key)?;
-        db.flush()?;
+        let removed = db.remove(&StoreKey::new(tree, key));
         Ok(removed.is_some())
     }
 
