@@ -44,7 +44,7 @@ const SLED_KEY_STORE_CIPHER: &str = "store_cipher";
 
 #[derive(Clone)]
 pub struct SledStore {
-    db: Arc<RwLock<HashMap<StoreKey, String>>>,
+    db: Arc<RwLock<HashMap<StoreKey, Vec<u8>>>>,
     #[cfg(feature = "encryption")]
     cipher: Option<Arc<presage_store_cipher::StoreCipher>>,
     /// Whether to trust new identities automatically (for instance, when a somebody's phone has changed)
@@ -214,7 +214,7 @@ impl SledStore {
     // }
     
     fn read(&self) -> RwLockReadGuard<HashMap<StoreKey, Vec<u8>>> {
-        self.db
+        self.db.read().expect("poisoned rwlock")
     }
     
 
@@ -223,8 +223,8 @@ impl SledStore {
     // }
 
     fn write(&self) -> RwLockWriteGuard<HashMap<StoreKey, Vec<u8>>> {
-        self.db
-    }
+        self.db.write().expect("poisoned rwlock") 
+   }
 
     fn schema_version(&self) -> SchemaVersion {
         self.get(SLED_TREE_STATE, SLED_KEY_SCHEMA_VERSION)
