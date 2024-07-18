@@ -111,14 +111,14 @@ pub enum OnNewIdentity {
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct StoreKey {
     table: String,
-    key: String,
+    key: Vec<u8>,
 }
 
 impl StoreKey {
-    fn new(table: &str, key: &str) -> StoreKey {
+    fn new(table: &str, key: &[u8]) -> StoreKey {
         StoreKey {
             table: table.to_string(),
-            key: key.to_string()
+            key: Vec::from(key)
         }
     }
 }
@@ -132,7 +132,7 @@ impl SledStore {
     ) -> Result<Self, SledStoreError> {
         // let database = sled::open(db_path)?;
 
-        let database: HashMap<StoreKey, Vec<u8>> = HashMap::new();
+        let database: HashMap<StoreKey<K>, Vec<u8>> = HashMap::new();
 
         #[cfg(feature = "encryption")]
         let cipher = passphrase
@@ -263,11 +263,11 @@ impl SledStore {
 
     pub fn get<K, V>(&self, tree: &str, key: K) -> Result<Option<V>, SledStoreError>
     where
-        K: AsRef<[u8]>,
+        K: AsRef<[u8]>, // expecting a key that implements the generic trait AsRef for the type u8
         V: DeserializeOwned,
     {
         self.read()
-            .get(&StoreKey::new(tree, key))?
+            .get(&StoreKey::new(tree, key.as_ref()))?
             .map(|p| self.decrypt_value(p))
             .transpose()
             .map_err(SledStoreError::from) // TODO 
@@ -309,7 +309,7 @@ impl SledStore {
     fn profile_key_for_uuid(&self, uuid: Uuid, key: ProfileKey) -> String {
         let key = uuid.into_bytes().into_iter().chain(key.get_bytes());
 
-        let mut hasher = Sha256::new();
+        let mut hasher = Sha256::new(); 
         hasher.update(key.collect::<Vec<_>>());
         format!("{:x}", hasher.finalize())
     }
