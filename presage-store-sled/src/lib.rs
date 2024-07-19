@@ -108,7 +108,7 @@ pub enum OnNewIdentity {
     Trust,
 }
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Debug, Clone)]
 pub struct StoreKey {
     table: String,
     key: Vec<u8>,
@@ -199,7 +199,7 @@ impl SledStore {
 
     #[cfg(test)]
     fn temporary() -> Result<Self, SledStoreError> {
-        let db = sled::Config::new().temporary(true).open()?;
+        let db = HashMap::new();
         Ok(Self {
             db: Arc::new(RwLock::new(db)),
             #[cfg(feature = "encryption")]
@@ -291,9 +291,9 @@ impl SledStore {
         V: Serialize,
     {
         let value = self.encrypt_value(&value)?;
-        let db = self.write();
+        let mut db = self.write();
         // let replaced = db.open_tree(tree)?.insert(key, value)?;
-        let replaced = db.insert(StoreKey::new(tree, key), value);
+        let replaced = db.insert(StoreKey::new(tree, key.as_ref()), value);
         Ok(replaced.is_some())
     }
 
@@ -301,8 +301,8 @@ impl SledStore {
     where
         K: AsRef<[u8]>,
     {
-        let db = self.write();
-        let removed = db.remove(&StoreKey::new(tree, key));
+        let mut db = self.write();
+        let removed = db.remove(&StoreKey::new(tree, key.as_ref()));
         Ok(removed.is_some())
     }
 
@@ -338,119 +338,119 @@ impl SledStore {
     }
 }
 
-fn migrate(
-    db_path: impl AsRef<Path>,
-    passphrase: Option<impl AsRef<str>>,
-    migration_conflict_strategy: MigrationConflictStrategy,
-) -> Result<(), SledStoreError> {
-    let db_path = db_path.as_ref();
-    let passphrase = passphrase.as_ref();
+// fn migrate(
+//     db_path: impl AsRef<Path>,
+//     passphrase: Option<impl AsRef<str>>,
+//     migration_conflict_strategy: MigrationConflictStrategy,
+// ) -> Result<(), SledStoreError> {
+//     let db_path = db_path.as_ref();
+//     let passphrase = passphrase.as_ref();
 
-    let run_migrations = move || {
-        let mut store = SledStore::new(db_path, passphrase, OnNewIdentity::Reject)?;
-        let schema_version = store.schema_version();
-        for step in schema_version.steps() {
-            match &step {
-                SchemaVersion::V1 => {
-                    debug!("migrating from v0, nothing to do")
-                }
-                SchemaVersion::V2 => {
-                    debug!("migrating from schema v1 to v2: encrypting state if cipher is enabled");
+//     let run_migrations = move || {
+//         let mut store = SledStore::new(db_path, passphrase, OnNewIdentity::Reject)?;
+//         let schema_version = store.schema_version();
+//         for step in schema_version.steps() {
+//             match &step {
+//                 SchemaVersion::V1 => {
+//                     debug!("migrating from v0, nothing to do")
+//                 }
+//                 SchemaVersion::V2 => {
+//                     debug!("migrating from schema v1 to v2: encrypting state if cipher is enabled");
 
-                    // load registration data the old school way
-                    let registration = store.read().get(SLED_KEY_REGISTRATION)?;
-                    if let Some(data) = registration {
-                        let state = serde_json::from_slice(&data).map_err(SledStoreError::from)?;
+//                     // load registration data the old school way
+//                     let registration = store.read().get(SLED_KEY_REGISTRATION)?;
+//                     if let Some(data) = registration {
+//                         let state = serde_json::from_slice(&data).map_err(SledStoreError::from)?;
 
-                        // save it the new school way
-                        store.save_registration_data(&state)?;
+//                         // save it the new school way
+//                         store.save_registration_data(&state)?;
 
-                        // remove old data
-                        let db = store.write();
-                        db.remove(SLED_KEY_REGISTRATION)?;
-                        db.flush()?;
-                    }
-                }
-                SchemaVersion::V3 => {
-                    debug!("migrating from schema v2 to v3: dropping encrypted group cache");
-                    store.clear_groups()?;
-                }
-                SchemaVersion::V4 => {
-                    debug!("migrating from schema v3 to v4: dropping profile cache");
-                    store.clear_profiles()?;
-                }
-                SchemaVersion::V5 => {
-                    debug!("migrating from schema v4 to v5: moving identity key pairs");
+//                         // remove old data
+//                         let db = store.write();
+//                         db.remove(SLED_KEY_REGISTRATION)?;
+//                         db.flush()?;
+//                     }
+//                 }
+//                 SchemaVersion::V3 => {
+//                     debug!("migrating from schema v2 to v3: dropping encrypted group cache");
+//                     store.clear_groups()?;
+//                 }
+//                 SchemaVersion::V4 => {
+//                     debug!("migrating from schema v3 to v4: dropping profile cache");
+//                     store.clear_profiles()?;
+//                 }
+//                 SchemaVersion::V5 => {
+//                     debug!("migrating from schema v4 to v5: moving identity key pairs");
 
-                    #[derive(Deserialize)]
-                    struct RegistrationDataV4Keys {
-                        #[serde(with = "serde_private_key", rename = "private_key")]
-                        pub(crate) aci_private_key: PrivateKey,
-                        #[serde(with = "serde_identity_key", rename = "public_key")]
-                        pub(crate) aci_public_key: IdentityKey,
-                        #[serde(with = "serde_optional_private_key", default)]
-                        pub(crate) pni_private_key: Option<PrivateKey>,
-                        #[serde(with = "serde_optional_identity_key", default)]
-                        pub(crate) pni_public_key: Option<IdentityKey>,
-                    }
+//                     #[derive(Deserialize)]
+//                     struct RegistrationDataV4Keys {
+//                         #[serde(with = "serde_private_key", rename = "private_key")]
+//                         pub(crate) aci_private_key: PrivateKey,
+//                         #[serde(with = "serde_identity_key", rename = "public_key")]
+//                         pub(crate) aci_public_key: IdentityKey,
+//                         #[serde(with = "serde_optional_private_key", default)]
+//                         pub(crate) pni_private_key: Option<PrivateKey>,
+//                         #[serde(with = "serde_optional_identity_key", default)]
+//                         pub(crate) pni_public_key: Option<IdentityKey>,
+//                     }
 
-                    let run_step = || -> Result<(), SledStoreError> {
-                        let registration_data: Option<RegistrationDataV4Keys> =
-                            store.get(SLED_TREE_STATE, SLED_KEY_REGISTRATION)?;
-                        if let Some(data) = registration_data {
-                            store.set_aci_identity_key_pair(IdentityKeyPair::new(
-                                data.aci_public_key,
-                                data.aci_private_key,
-                            ))?;
-                            if let Some((public_key, private_key)) =
-                                data.pni_public_key.zip(data.pni_private_key)
-                            {
-                                store.set_pni_identity_key_pair(IdentityKeyPair::new(
-                                    public_key,
-                                    private_key,
-                                ))?;
-                            }
-                        }
-                        Ok(())
-                    };
+//                     let run_step = || -> Result<(), SledStoreError> {
+//                         let registration_data: Option<RegistrationDataV4Keys> =
+//                             store.get(SLED_TREE_STATE, SLED_KEY_REGISTRATION)?;
+//                         if let Some(data) = registration_data {
+//                             store.set_aci_identity_key_pair(IdentityKeyPair::new(
+//                                 data.aci_public_key,
+//                                 data.aci_private_key,
+//                             ))?;
+//                             if let Some((public_key, private_key)) =
+//                                 data.pni_public_key.zip(data.pni_private_key)
+//                             {
+//                                 store.set_pni_identity_key_pair(IdentityKeyPair::new(
+//                                     public_key,
+//                                     private_key,
+//                                 ))?;
+//                             }
+//                         }
+//                         Ok(())
+//                     };
 
-                    if let Err(error) = run_step() {
-                        log::error!("failed to run v4 -> v5 migration: {error}");
-                    }
-                }
-                _ => return Err(SledStoreError::MigrationConflict),
-            }
+//                     if let Err(error) = run_step() {
+//                         log::error!("failed to run v4 -> v5 migration: {error}");
+//                     }
+//                 }
+//                 _ => return Err(SledStoreError::MigrationConflict),
+//             }
 
-            store.insert(SLED_TREE_STATE, SLED_KEY_SCHEMA_VERSION, step)?;
-        }
+//             store.insert(SLED_TREE_STATE, SLED_KEY_SCHEMA_VERSION, step)?;
+//         }
 
-        Ok(())
-    };
+//         Ok(())
+//     };
 
-    if let Err(SledStoreError::MigrationConflict) = run_migrations() {
-        match migration_conflict_strategy {
-            MigrationConflictStrategy::BackupAndDrop => {
-                let mut new_db_path = db_path.to_path_buf();
-                new_db_path.set_extension(format!(
-                    "{}.backup",
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("time doesn't go backwards")
-                        .as_secs()
-                ));
-                fs_extra::dir::create_all(&new_db_path, false)?;
-                fs_extra::dir::copy(db_path, new_db_path, &fs_extra::dir::CopyOptions::new())?;
-                fs_extra::dir::remove(db_path)?;
-            }
-            MigrationConflictStrategy::Drop => {
-                fs_extra::dir::remove(db_path)?;
-            }
-            MigrationConflictStrategy::Raise => return Err(SledStoreError::MigrationConflict),
-        }
-    }
+//     if let Err(SledStoreError::MigrationConflict) = run_migrations() {
+//         match migration_conflict_strategy {
+//             MigrationConflictStrategy::BackupAndDrop => {
+//                 let mut new_db_path = db_path.to_path_buf();
+//                 new_db_path.set_extension(format!(
+//                     "{}.backup",
+//                     SystemTime::now()
+//                         .duration_since(UNIX_EPOCH)
+//                         .expect("time doesn't go backwards")
+//                         .as_secs()
+//                 ));
+//                 fs_extra::dir::create_all(&new_db_path, false)?;
+//                 fs_extra::dir::copy(db_path, new_db_path, &fs_extra::dir::CopyOptions::new())?;
+//                 fs_extra::dir::remove(db_path)?;
+//             }
+//             MigrationConflictStrategy::Drop => {
+//                 fs_extra::dir::remove(db_path)?;
+//             }
+//             MigrationConflictStrategy::Raise => return Err(SledStoreError::MigrationConflict),
+//         }
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 impl StateStore for SledStore {
     type StateStoreError = SledStoreError;
