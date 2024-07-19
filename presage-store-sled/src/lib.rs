@@ -132,7 +132,7 @@ impl SledStore {
     ) -> Result<Self, SledStoreError> {
         // let database = sled::open(db_path)?;
 
-        let database: HashMap<StoreKey<K>, Vec<u8>> = HashMap::new();
+        let database: HashMap<StoreKey, Vec<u8>> = HashMap::new();
 
         #[cfg(feature = "encryption")]
         let cipher = passphrase
@@ -179,10 +179,10 @@ impl SledStore {
 
     #[cfg(feature = "encryption")]
     fn get_or_create_store_cipher(
-        database: &sled::Db,
+        database: &HashMap<StoreKey, Vec<u8>>,
         passphrase: &str,
     ) -> Result<presage_store_cipher::StoreCipher, SledStoreError> {
-        let cipher = if let Some(key) = database.get(SLED_KEY_STORE_CIPHER)? {
+        let cipher = if let Some(key) = database.get(&StoreKey::new("default", SLED_KEY_STORE_CIPHER.as_bytes()))? {
             presage_store_cipher::StoreCipher::import(passphrase, &key)?
         } else {
             let cipher = presage_store_cipher::StoreCipher::new();
@@ -267,22 +267,22 @@ impl SledStore {
         V: DeserializeOwned,
     {
         self.read()
-            .get(&StoreKey::new(tree, key.as_ref()))?
-            .map(|p| self.decrypt_value(p))
+            .get(&StoreKey::new(tree, key.as_ref()))
+            .map(|p| self.decrypt_value(p.to_vec()))
             .transpose()
-            .map_err(SledStoreError::from) // TODO 
+            .map_err(SledStoreError::from) // TODO, deal with error types
     }
 
     pub fn iter<'a, V: DeserializeOwned + 'a>(
         &'a self,
-        tree: &str,
+        tree: &'a str,
     ) -> Result<impl Iterator<Item = Result<V, SledStoreError>> + 'a, SledStoreError> {
         Ok(self
             .read()
             // .open_tree(tree)?
             .iter()
             .filter(|(&key, _)| key.table == tree)
-            .flat_map(|res| res.map(|(_, value)| self.decrypt_value::<V>(value))))
+            .map(|(_, value)| self.decrypt_value::<V>(value.to_vec())))
     } 
 
     fn insert<K, V>(&self, tree: &str, key: K, value: V) -> Result<bool, SledStoreError>
