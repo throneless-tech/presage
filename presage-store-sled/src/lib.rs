@@ -173,7 +173,7 @@ impl SledStore {
     ) -> Result<Self, SledStoreError> {
         let passphrase = passphrase.as_ref();
 
-        migrate(&db_path, passphrase, migration_conflict_strategy)?;
+        // migrate(&db_path, passphrase, migration_conflict_strategy)?;
         Self::new(db_path, passphrase, trust_new_identities)
     }
 
@@ -190,7 +190,7 @@ impl SledStore {
             let export = cipher.export(passphrase);
             #[cfg(test)]
             let export = cipher.insecure_export_fast_for_testing(passphrase);
-            database.insert(SLED_KEY_STORE_CIPHER, export?)?;
+            database.insert(StoreKey::new("default", SLED_KEY_STORE_CIPHER.as_bytes()), export?);
             cipher
         };
 
@@ -304,6 +304,10 @@ impl SledStore {
         let mut db = self.write();
         let removed = db.remove(&StoreKey::new(tree, key.as_ref()));
         Ok(removed.is_some())
+    }
+
+    fn drop_table(&self, tree: &str) -> Result<(), SledStoreError> {
+        Ok(self.write().retain(|k, _| k.table != tree))
     }
 
     fn profile_key_for_uuid(&self, uuid: Uuid, key: ProfileKey) -> String {
@@ -485,10 +489,10 @@ impl StateStore for SledStore {
     fn clear_registration(&mut self) -> Result<(), SledStoreError> {
         // drop registration data (includes identity keys)
         {
-            let db = self.write();
-            db.remove(SLED_KEY_REGISTRATION)?;
-            db.drop_tree(SLED_TREE_STATE)?;
-            db.flush()?;
+            let mut db = self.write();
+            db.remove(&StoreKey::new("default", SLED_KEY_REGISTRATION.as_bytes()));
+            self.drop_table(SLED_TREE_STATE)?;
+            // db.flush()?;
         }
 
         // drop all saved profile (+avatards) and profile keys
