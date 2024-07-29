@@ -41,28 +41,28 @@ impl ContentsStore for SledStore {
     type StickerPacksIter = SledStickerPacksIter;
 
     fn clear_profiles(&mut self) -> Result<(), Self::ContentsStoreError> {
-        let db = self.write();
-        db.drop_tree(SLED_TREE_PROFILES)?;
-        db.drop_tree(SLED_TREE_PROFILE_KEYS)?;
-        db.drop_tree(SLED_TREE_PROFILE_AVATARS)?;
-        db.flush()?;
+        // let db = self.write();
+        self.drop_table(SLED_TREE_PROFILES)?;
+        self.drop_table(SLED_TREE_PROFILE_KEYS)?;
+        self.drop_table(SLED_TREE_PROFILE_AVATARS)?;
+        // db.flush()?;
         Ok(())
     }
 
     fn clear_contents(&mut self) -> Result<(), Self::ContentsStoreError> {
-        let db = self.write();
-        db.drop_tree(SLED_TREE_CONTACTS)?;
-        db.drop_tree(SLED_TREE_GROUPS)?;
+        // let db = self.db.write();
+        self.drop_table(SLED_TREE_CONTACTS)?;
+        self.drop_table(SLED_TREE_GROUPS)?;
 
-        for tree in db
-            .tree_names()
-            .into_iter()
-            .filter(|n| n.starts_with(SLED_TREE_THREADS_PREFIX.as_bytes()))
+        for (key, _) in self.read()
+            // .tree_names()
+            .iter()
+            .filter(|(n, _)| n.table.starts_with(SLED_TREE_THREADS_PREFIX))
         {
-            db.drop_tree(tree)?;
+            self.drop_table(&key.table)?;
         }
 
-        db.flush()?;
+        // db.flush()?;
         Ok(())
     }
 
