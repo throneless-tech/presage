@@ -132,11 +132,11 @@ impl SledStore {
     ) -> Result<Self, SledStoreError> {
         // let database = sled::open(db_path)?;
 
-        let database: HashMap<StoreKey, Vec<u8>> = HashMap::new();
+        let mut database: HashMap<StoreKey, Vec<u8>> = HashMap::new();
 
         #[cfg(feature = "encryption")]
         let cipher = passphrase
-            .map(|p| Self::get_or_create_store_cipher(&database, p.as_ref()))
+            .map(|p| Self::get_or_create_store_cipher(&mut database, p.as_ref()))
             .transpose()?;
 
         #[cfg(not(feature = "encryption"))]
@@ -179,10 +179,10 @@ impl SledStore {
 
     #[cfg(feature = "encryption")]
     fn get_or_create_store_cipher(
-        database: &HashMap<StoreKey, Vec<u8>>,
+        database: &mut HashMap<StoreKey, Vec<u8>>,
         passphrase: &str,
     ) -> Result<presage_store_cipher::StoreCipher, SledStoreError> {
-        let cipher = if let Some(key) = database.get(&StoreKey::new("default", SLED_KEY_STORE_CIPHER.as_bytes()))? {
+        let cipher = if let Some(key) = database.get(&StoreKey::new("default", SLED_KEY_STORE_CIPHER.as_bytes())) {
             presage_store_cipher::StoreCipher::import(passphrase, &key)?
         } else {
             let cipher = presage_store_cipher::StoreCipher::new();
@@ -279,9 +279,9 @@ impl SledStore {
     ) -> Result<impl Iterator<Item = Result<V, SledStoreError>> + 'a, SledStoreError> {
         Ok(self
             .read()
-            // .open_tree(tree)?
-            .iter()
-            .filter(|(&key, _)| key.table == tree)
+            .clone()
+            .into_iter()
+            .filter(move |(ref key, _)| key.table == tree)
             .map(|(_, value)| self.decrypt_value::<V>(value.to_vec())))
     } 
 
