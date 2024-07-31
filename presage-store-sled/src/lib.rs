@@ -285,6 +285,18 @@ impl SledStore {
             .map(|(_, value)| self.decrypt_value::<V>(value.to_vec())))
     } 
 
+    pub fn iter_owned<'a, V: DeserializeOwned + 'a>(
+        &'a self,
+        tree: String,
+    ) -> Result<impl Iterator<Item = Result<V, SledStoreError>> + 'a, SledStoreError> {
+        Ok(self
+            .read()
+            .clone()
+            .into_iter()
+            .filter(move |(ref key, _)| key.table == tree.clone())
+            .map(|(_, value)| self.decrypt_value::<V>(value.to_vec())))
+    } 
+
     fn insert<K, V>(&self, tree: &str, key: K, value: V) -> Result<bool, SledStoreError>
     where
         K: AsRef<[u8]>,

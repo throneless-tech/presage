@@ -1,7 +1,9 @@
 use std::{
     ops::{Bound, RangeBounds, RangeFull},
     sync::Arc,
+    collections::hash_map::HashMap,
 };
+
 
 use log::debug;
 use presage::{
@@ -20,6 +22,8 @@ use prost::Message;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use sled::IVec;
+
+use crate::StoreKey;
 
 use crate::{protobuf::ContentProto, SledStore, SledStoreError};
 
@@ -67,7 +71,7 @@ impl ContentsStore for SledStore {
     }
 
     fn clear_contacts(&mut self) -> Result<(), SledStoreError> {
-        self.write().drop_tree(SLED_TREE_CONTACTS)?;
+        self.drop_table(SLED_TREE_CONTACTS)?;
         Ok(())
     }
 
@@ -78,10 +82,14 @@ impl ContentsStore for SledStore {
     }
 
     fn contacts(&self) -> Result<Self::ContactsIter, SledStoreError> {
+        let mut contacts_table = self.read().clone();
+        contacts_table.retain(|key, _| key.table.starts_with(SLED_TREE_CONTACTS));
+
         Ok(SledContactsIter {
-            iter: self.read().open_tree(SLED_TREE_CONTACTS)?.iter(),
+            iter: contacts_table.values().map(|value| value.clone()).collect(),
             #[cfg(feature = "encryption")]
             cipher: self.cipher.clone(),
+            index: 0,
         })
     }
 
@@ -92,9 +100,9 @@ impl ContentsStore for SledStore {
     /// Groups
 
     fn clear_groups(&mut self) -> Result<(), SledStoreError> {
-        let db = self.write();
-        db.drop_tree(SLED_TREE_GROUPS)?;
-        db.flush()?;
+        // let db = self.write();
+        self.drop_table(SLED_TREE_GROUPS)?;
+        // db.flush()?;
         Ok(())
     }
 
@@ -141,25 +149,25 @@ impl ContentsStore for SledStore {
     /// Messages
 
     fn clear_messages(&mut self) -> Result<(), SledStoreError> {
-        let db = self.write();
-        for name in db.tree_names() {
-            if name
-                .as_ref()
-                .starts_with(SLED_TREE_THREADS_PREFIX.as_bytes())
-            {
-                db.drop_tree(&name)?;
-            }
+        // let db = self.write();
+        for (key, _) in self.read()
+            .iter()
+            .filter(|(n, _)|n.table.starts_with(SLED_TREE_THREADS_PREFIX))
+
+        {
+            self.drop_table(&key.table)?;
         }
-        db.flush()?;
+    
+        // db.flush()?;
         Ok(())
     }
 
     fn clear_thread(&mut self, thread: &Thread) -> Result<(), SledStoreError> {
         log::trace!("clearing thread {thread}");
 
-        let db = self.write();
-        db.drop_tree(messages_thread_tree_name(thread))?;
-        db.flush()?;
+        // let db = self.write();
+        self.drop_table(&messages_thread_tree_name(thread))?;
+        // db.flush()?;
 
         Ok(())
     }
@@ -297,7 +305,13 @@ impl ContentsStore for SledStore {
 pub struct SledContactsIter {
     #[cfg(feature = "encryption")]
     cipher: Option<Arc<presage_store_cipher::StoreCipher>>,
-    iter: sled::Iter,
+    /***
+     * instead of the iter here being an actual iter type,
+     * we've decided to use just the hashmap here and iterate
+     * over that whenever iterating is needed
+     */     
+    iter: Vec<Vec<u8>>,
+    index: usize
 }
 
 impl SledContactsIter {
@@ -319,12 +333,12 @@ impl SledContactsIter {
 impl Iterator for SledContactsIter {
     type Item = Result<Contact, SledStoreError>;
 
+
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .next()?
-            .map_err(SledStoreError::from)
-            .and_then(|(_key, value)| self.decrypt_value(&value))
-            .into()
+        let contact = self.decrypt_value(&self.iter[self.index])
+        .into();
+        self.index = self.index + 1;
+        contact
     }
 }
 
